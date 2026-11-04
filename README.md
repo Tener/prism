@@ -589,6 +589,22 @@ Two limitations worth knowing:
 | `prism uninstall` | Remove the system service. |
 | `prism version` | Print build version. |
 
+`prism usage`, `prism doctor`, and `prism status` use colors when stdout
+is a terminal.
+The global `--color=auto|always|never` flag goes before the command.
+Set `NO_COLOR=1` or use `--color=never` to disable colors. `--color=always`
+forces them, overriding terminal detection and `NO_COLOR`:
+
+```bash
+watch -c 'prism --color=always usage'
+```
+
+The default, `--color=auto`, leaves pipes and redirected output uncolored.
+`prism usage --json` is always uncolored, including with `--color=always`.
+Usage, doctor, and status also accept the shared flag after the command.
+Put Prism's global flags before commands that launch another tool so the
+tool receives its own arguments unchanged.
+
 ---
 
 ## Troubleshooting

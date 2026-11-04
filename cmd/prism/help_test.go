@@ -22,9 +22,9 @@ var undocumentedSubcommands = map[string]bool{
 	"-h":        true,
 }
 
-// prism dispatches on os.Args[1], and the usage text is maintained by
-// hand, so the two can drift: `prism pi config` shipped for several
-// releases without ever appearing in the help. Every case a user is
+// prism dispatches on the parsed command name, and the usage text is
+// maintained by hand, so the two can drift: `prism pi config` shipped
+// for several releases without ever appearing in the help. Every case a user is
 // meant to type must show up in the usage output.
 func TestEverySubcommandIsDocumented(t *testing.T) {
 	names := dispatchedSubcommands(t)
@@ -58,13 +58,16 @@ func TestUsageOnlyListsRealSubcommands(t *testing.T) {
 	writeUsage(&buf)
 
 	for _, line := range strings.Split(buf.String(), "\n") {
-		// Command entries are indented under "Usage:"; the unindented
+		// Command entries are indented under "Commands:"; the unindented
 		// first line is the banner, where the second field is the
 		// version rather than a subcommand.
 		if !strings.HasPrefix(line, "  prism ") {
 			continue
 		}
 		name := strings.Fields(line)[1]
+		if name == "[global" {
+			continue
+		}
 		if !dispatched[name] {
 			t.Errorf("usage text lists %q, which no case in main.go dispatches", name)
 		}
@@ -87,8 +90,8 @@ func dispatchedSubcommands(t *testing.T) []string {
 		if !ok || sw.Tag == nil {
 			return true
 		}
-		// The dispatch switch is the one keyed on os.Args.
-		if !strings.Contains(types.ExprString(sw.Tag), "os.Args") {
+		// The dispatch switch is keyed on the parsed command name.
+		if types.ExprString(sw.Tag) != "command" {
 			return true
 		}
 		for _, stmt := range sw.Body.List {

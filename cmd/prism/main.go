@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,12 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintf(w, `prism %s — route local AI traffic through Teleport cluster apps
 
 Usage:
+  prism [global flags] <command> [args...]
+
+Global flags:
+  --color auto|always|never     # color output (default: auto)
+
+Commands:
   prism claude [args...]        # up + exec claude with prism env
   prism codex [args...]         # up + exec codex with prism env
   prism opencode [args...]      # up + exec opencode with prism env
@@ -49,7 +56,8 @@ Usage:
   prism test [anthropic|openai|all] [--model <m>] [--format <f>] [--stream]
                                   # exercise the local router end-to-end
   prism usage [--week|--all|--json]
-  prism doctor [--no-request]     # check everything and say what is wrong
+  prism doctor [--no-request]
+                                  # check everything and say what is wrong
   prism config [show|set <k> <v>|unset <k>|clear]
   prism tbot [bootstrap|configure|status|reset]
   prism install                   # install as system service (Linux/macOS)
@@ -60,15 +68,38 @@ Usage:
 `, version)
 }
 
+func parseGlobalArgs(args []string) ([]string, error) {
+	_ = setColorMode("auto")
+	fs := flag.NewFlagSet("prism", flag.ContinueOnError)
+	addGlobalFlags(fs)
+	var showVersion bool
+	fs.BoolVar(&showVersion, "version", false, "print version")
+	fs.BoolVar(&showVersion, "v", false, "print version")
+	fs.Usage = usage
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if showVersion {
+		return append([]string{"version"}, fs.Args()...), nil
+	}
+	return fs.Args(), nil
+}
+
 func main() {
-	if len(os.Args) < 2 {
+	args, err := parseGlobalArgs(os.Args[1:])
+	if err != nil {
+		if err == flag.ErrHelp {
+			return
+		}
+		os.Exit(2)
+	}
+	if len(args) == 0 {
 		usage()
 		os.Exit(2)
 	}
 	applyConfigEnv()
-	args := os.Args[2:]
-	var err error
-	switch os.Args[1] {
+	command, args := args[0], args[1:]
+	switch command {
 	case "claude":
 		err = cmdClaude(args)
 	case "codex":
@@ -110,7 +141,7 @@ func main() {
 	case "help", "--help", "-h":
 		usage()
 	default:
-		fmt.Fprintf(os.Stderr, "prism: unknown subcommand %q\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "prism: unknown subcommand %q\n", command)
 		usage()
 		os.Exit(2)
 	}
