@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fatih/color"
+
 	"github.com/webvictim/prism/internal/config"
 	"github.com/webvictim/prism/internal/logfile"
 	"github.com/webvictim/prism/internal/machineid"
@@ -56,13 +58,13 @@ const (
 func (s checkStatus) label() string {
 	switch s {
 	case statusOK:
-		return "[ ok ]"
+		return successColor.Sprint("[ ok ]")
 	case statusWarn:
-		return "[warn]"
+		return warningColor.Sprint("[warn]")
 	case statusFail:
-		return "[FAIL]"
+		return failureColor.Sprint("[FAIL]")
 	default:
-		return "[    ]"
+		return dimColor.Sprint("[    ]")
 	}
 }
 
@@ -82,9 +84,16 @@ type report struct {
 
 func (r *report) add(c check) {
 	r.checks = append(r.checks, c)
-	fmt.Fprintf(r.out, "%s %-18s %s\n", c.Status.label(), c.Name, c.Detail)
+	detail := c.Detail
+	switch c.Status {
+	case statusWarn:
+		detail = warningColor.Sprint(detail)
+	case statusFail:
+		detail = failureColor.Sprint(detail)
+	}
+	fmt.Fprintf(r.out, "%s %s %s\n", c.Status.label(), boldColor.Sprintf("%-18s", c.Name), detail)
 	if c.Fix != "" {
-		fmt.Fprintf(r.out, "       → %s\n", c.Fix)
+		proxyColor.Fprintf(r.out, "       → %s\n", c.Fix)
 	}
 }
 
@@ -113,9 +122,10 @@ func cmdDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	noRequest := fs.Bool("no-request", false, "skip the live request through the router")
 	model := fs.String("model", "", "Anthropic model for the live request (default: anthropic_test_model, else "+defaultAnthropicTestModel+")")
+	addGlobalFlags(fs)
 	_ = fs.Parse(args)
 
-	out := os.Stdout
+	out := color.Output
 	r := &report{out: out}
 
 	hostname, _ := os.Hostname()
@@ -125,8 +135,8 @@ func cmdDoctor(args []string) error {
 	}
 	s, _ := state.Load()
 
-	fmt.Fprintln(out, "prism doctor")
-	fmt.Fprintln(out, repeat("─", 60))
+	headingColor.Fprintln(out, "prism doctor")
+	dimColor.Fprintln(out, repeat("─", 60))
 	self, _ := os.Executable()
 	fmt.Fprintf(out, "prism %s · %s/%s · host %s · %s\n", version, runtime.GOOS, runtime.GOARCH,
 		hostname, time.Now().Format(time.RFC3339))
@@ -169,17 +179,17 @@ func cmdDoctor(args []string) error {
 		checkGateway(r, s, cmp.Or(*model, anthropicTestModel(cfg)))
 	}
 
-	fmt.Fprintln(out, repeat("─", 60))
+	dimColor.Fprintln(out, repeat("─", 60))
 	failed, warned := r.count(statusFail), r.count(statusWarn)
 	switch {
 	case failed == 0 && warned == 0:
-		fmt.Fprintln(out, "prism doctor: everything checks out.")
+		successColor.Fprintln(out, "prism doctor: everything checks out.")
 		return nil
 	case failed == 0:
-		fmt.Fprintf(out, "prism doctor: %d warning(s), nothing broken.\n", warned)
+		warningColor.Fprintf(out, "prism doctor: %d warning(s), nothing broken.\n", warned)
 		return nil
 	}
-	fmt.Fprintf(out, "prism doctor: %d check(s) failed, %d warning(s).\n", failed, warned)
+	failureColor.Fprintf(out, "prism doctor: %d check(s) failed, %d warning(s).\n", failed, warned)
 	if identity == state.IdentitySourceTbot {
 		fmt.Fprintln(out, "If the failures are about the bot or the tunnel, `prism tbot reset` rebuilds")
 		fmt.Fprintln(out, "this machine's identity from scratch and checks it works.")

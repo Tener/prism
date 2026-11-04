@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/fatih/color"
+
 	usagepkg "github.com/webvictim/prism/internal/usage"
 )
 
@@ -15,6 +17,7 @@ func cmdUsage(args []string) error {
 	week := fs.Bool("week", false, "show last 7 days")
 	all := fs.Bool("all", false, "show all time")
 	asJSON := fs.Bool("json", false, "output raw JSONL records")
+	addGlobalFlags(fs)
 	_ = fs.Parse(args)
 
 	path, err := usagepkg.Dir()
@@ -47,8 +50,9 @@ func cmdUsage(args []string) error {
 		return nil
 	}
 
+	out := color.Output
 	if len(records) == 0 {
-		fmt.Printf("No usage data (%s)\n", label)
+		fmt.Fprintf(out, "No usage data (%s)\n", label)
 		return nil
 	}
 
@@ -59,48 +63,48 @@ func cmdUsage(args []string) error {
 		totalOut += r.OutputTokens
 	}
 
-	fmt.Printf("prism usage (%s, %d requests)\n", label, len(records))
-	fmt.Println(repeat("─", 60))
+	headingColor.Fprintf(out, "prism usage (%s, %d requests)\n", label, len(records))
+	dimColor.Fprintln(out, repeat("─", 60))
 
 	// By model.
 	models := usagepkg.Summary(records)
-	fmt.Printf("\n%-40s %8s %8s\n", "Model", "Input", "Output")
-	fmt.Println(repeat("─", 60))
+	headingColor.Fprintf(out, "\n%-40s %8s %8s\n", "Model", "Input", "Output")
+	dimColor.Fprintln(out, repeat("─", 60))
 	for _, m := range models {
 		name := m.Model
 		if name == "" {
 			name = "(unknown)"
 		}
-		fmt.Printf("%-40s %8s %8s", name, usagepkg.FormatTokens(m.InputTokens), usagepkg.FormatTokens(m.OutputTokens))
+		fmt.Fprintf(out, "%s %s %s", nameColor.Sprintf("%-40s", name), inputColor.Sprintf("%8s", usagepkg.FormatTokens(m.InputTokens)), outputColor.Sprintf("%8s", usagepkg.FormatTokens(m.OutputTokens)))
 		if m.CacheRead > 0 || m.CacheCreate > 0 {
-			fmt.Printf("  cache: r=%s w=%s", usagepkg.FormatTokens(m.CacheRead), usagepkg.FormatTokens(m.CacheCreate))
+			fmt.Fprintf(out, "  cache: r=%s w=%s", inputColor.Sprint(usagepkg.FormatTokens(m.CacheRead)), outputColor.Sprint(usagepkg.FormatTokens(m.CacheCreate)))
 		}
-		fmt.Println()
+		fmt.Fprintln(out)
 	}
 
 	// Models the gateway swapped. Its own section because the number
 	// that matters is how often it happened, not the token counts: the
 	// client reported (and priced) the model it asked for every time.
 	if subs := usagepkg.Substitutions(records); len(subs) > 0 {
-		fmt.Printf("\n%-49s %9s\n", "Substituted by gateway  [!]", "Requests")
-		fmt.Println(repeat("─", 60))
+		warningColor.Fprintf(out, "\n%-49s %9s\n", "Substituted by gateway  [!]", "Requests")
+		dimColor.Fprintln(out, repeat("─", 60))
 		for _, sub := range subs {
-			fmt.Printf("%-49s %9d\n", sub.Requested+" → "+sub.Served, sub.Requests)
+			warningColor.Fprintf(out, "%-49s %9d\n", sub.Requested+" → "+sub.Served, sub.Requests)
 		}
 	}
 
 	// By proxy.
 	proxies := usagepkg.SummaryByProxy(records)
 	if len(proxies) > 0 {
-		fmt.Printf("\n%-40s %8s %8s\n", "Proxy", "Input", "Output")
-		fmt.Println(repeat("─", 60))
+		headingColor.Fprintf(out, "\n%-40s %8s %8s\n", "Proxy", "Input", "Output")
+		dimColor.Fprintln(out, repeat("─", 60))
 		for _, p := range proxies {
-			fmt.Printf("%-40s %8s %8s\n", p.Proxy, usagepkg.FormatTokens(p.InputTokens), usagepkg.FormatTokens(p.OutputTokens))
+			fmt.Fprintf(out, "%s %s %s\n", proxyColor.Sprintf("%-40s", p.Proxy), inputColor.Sprintf("%8s", usagepkg.FormatTokens(p.InputTokens)), outputColor.Sprintf("%8s", usagepkg.FormatTokens(p.OutputTokens)))
 		}
 	}
 
-	fmt.Println(repeat("─", 60))
-	fmt.Printf("%-40s %8s %8s\n", "TOTAL", usagepkg.FormatTokens(totalIn), usagepkg.FormatTokens(totalOut))
+	dimColor.Fprintln(out, repeat("─", 60))
+	successColor.Fprintf(out, "%-40s %8s %8s\n", "TOTAL", usagepkg.FormatTokens(totalIn), usagepkg.FormatTokens(totalOut))
 
 	return nil
 }

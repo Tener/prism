@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/fatih/color"
 
 	"github.com/webvictim/prism/internal/logfile"
 	"github.com/webvictim/prism/internal/state"
@@ -14,14 +17,22 @@ import (
 	"github.com/webvictim/prism/internal/tshwrap"
 )
 
-func cmdStatus(_ []string) error {
+func cmdStatus(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	addGlobalFlags(fs)
+	_ = fs.Parse(args)
+	out := color.Output
 	// Before the state file, because a service definition pointing at a
 	// binary that is gone is exactly why there may be no session to
 	// report.
 	staleness := serviceStale()
 	if staleness.stale() {
-		fmt.Fprintf(os.Stdout, "prism: service definition is stale (%s)\n", staleness.Reason)
-		fmt.Fprintln(os.Stdout, "       `prism up` repairs it; `prism install` rewrites it now")
+		style := warningColor
+		if staleness.Breaks {
+			style = failureColor
+		}
+		style.Fprintf(out, "prism: service definition is stale (%s)\n", staleness.Reason)
+		proxyColor.Fprintln(out, "       `prism up` repairs it; `prism install` rewrites it now")
 	}
 
 	s, err := state.Load()
@@ -29,7 +40,7 @@ func cmdStatus(_ []string) error {
 		return err
 	}
 	if s == nil {
-		fmt.Println("prism: no active session")
+		warningColor.Fprintln(out, "prism: no active session")
 		return nil
 	}
 	logDir, _ := state.DaemonLogDir()
@@ -44,14 +55,21 @@ func cmdStatus(_ []string) error {
 		alive = "alive (port responding)"
 	}
 
-	fmt.Fprintln(os.Stdout, "prism status")
-	fmt.Fprintln(os.Stdout, "------------")
-	fmt.Fprintf(os.Stdout, "Router:      127.0.0.1:%d  [%s]\n", s.LocalPort, alive)
-	fmt.Fprintf(os.Stdout, "Health:      http://127.0.0.1:%d/_prism/health\n", s.LocalPort)
-	fmt.Fprintf(os.Stdout, "Anthropic:   127.0.0.1:%d (app=%s)\n", s.AnthropicPort, "anthropic")
-	fmt.Fprintf(os.Stdout, "OpenAI:      127.0.0.1:%d (app=%s)\n", s.OpenAIPort, "openai")
+	headingColor.Fprintln(out, "prism status")
+	dimColor.Fprintln(out, "------------")
+	field := func(label, value string) {
+		fmt.Fprintf(out, "%s %s\n", boldColor.Sprintf("%-12s", label), value)
+	}
+	aliveStyle := successColor
+	if alive == "DEAD" {
+		aliveStyle = failureColor
+	}
+	field("Router:", fmt.Sprintf("%s  %s", nameColor.Sprintf("127.0.0.1:%d", s.LocalPort), aliveStyle.Sprintf("[%s]", alive)))
+	field("Health:", proxyColor.Sprintf("http://127.0.0.1:%d/_prism/health", s.LocalPort))
+	field("Anthropic:", fmt.Sprintf("%s (app=anthropic)", nameColor.Sprintf("127.0.0.1:%d", s.AnthropicPort)))
+	field("OpenAI:", fmt.Sprintf("%s (app=openai)", nameColor.Sprintf("127.0.0.1:%d", s.OpenAIPort)))
 	if s.TbotDiagPort != 0 {
-		fmt.Fprintf(os.Stdout, "Bot diag:    127.0.0.1:%d\n", s.TbotDiagPort)
+		field("Bot diag:", nameColor.Sprintf("127.0.0.1:%d", s.TbotDiagPort))
 	}
 	// `prism status` reports; `prism doctor` explains. Anything here
 	// that isn't healthy earns a pointer at the command that says what
@@ -59,31 +77,43 @@ func cmdStatus(_ []string) error {
 	unhealthy := staleness.stale() || alive == "DEAD"
 	if s.Identity() == state.IdentitySourceTbot {
 		health := tbotHealthLine(s.TbotDiagPort)
-		fmt.Fprintf(os.Stdout, "Identity:    tbot (managed, dir=%s)\n", s.TbotDir)
-		fmt.Fprintf(os.Stdout, "Bot health:  %s\n", health)
+		healthStyle := warningColor
+		if strings.HasPrefix(health, "ok") {
+			healthStyle = successColor
+		} else if strings.HasPrefix(health, "unreachable") || strings.HasPrefix(health, "LIVE FAIL") {
+			healthStyle = failureColor
+		}
+		field("Identity:", fmt.Sprintf("tbot (managed, dir=%s)", proxyColor.Sprint(s.TbotDir)))
+		field("Bot health:", healthStyle.Sprint(health))
 		if !strings.HasPrefix(health, "ok") {
 			unhealthy = true
 		}
 		if msg := tbotStaleTTLWarning(s.TbotDir); msg != "" {
-			fmt.Fprintf(os.Stdout, "\n  WARNING: %s\n", msg)
+			warningColor.Fprintf(out, "\n  WARNING: %s\n", msg)
 			unhealthy = true
 		}
 	} else {
 		identity := identityLine()
-		fmt.Fprintf(os.Stdout, "Identity:    %s\n", identity)
+		identityStyle := warningColor
+		if strings.HasPrefix(identity, "ok") {
+			identityStyle = successColor
+		} else if strings.HasPrefix(identity, "EXPIRED") || strings.HasPrefix(identity, "not logged in") {
+			identityStyle = failureColor
+		}
+		field("Identity:", identityStyle.Sprint(identity))
 		if !strings.HasPrefix(identity, "ok") {
 			unhealthy = true
 		}
 	}
-	fmt.Fprintf(os.Stdout, "Created:     %s (%s ago)\n", s.CreatedAt.Local().Format(time.RFC3339), time.Since(s.CreatedAt).Round(time.Second))
-	fmt.Fprintf(os.Stdout, "State file:  %s\n", statePath)
+	field("Created:", fmt.Sprintf("%s (%s ago)", s.CreatedAt.Local().Format(time.RFC3339), time.Since(s.CreatedAt).Round(time.Second)))
+	field("State file:", proxyColor.Sprint(statePath))
 	if isServiceManaged() && serviceManagedLabel() == "systemd-managed" {
-		fmt.Fprintln(os.Stdout, "Daemon log:  journalctl --user -u prism")
+		field("Daemon log:", proxyColor.Sprint("journalctl --user -u prism"))
 	} else {
-		fmt.Fprintf(os.Stdout, "Daemon log:  %s\n", logfile.LatestPath(logDir))
+		field("Daemon log:", proxyColor.Sprint(logfile.LatestPath(logDir)))
 	}
 	if unhealthy {
-		fmt.Fprintln(os.Stdout, "\nSomething above isn't healthy — `prism doctor` checks it all and says what to do.")
+		warningColor.Fprintln(out, "\nSomething above isn't healthy — `prism doctor` checks it all and says what to do.")
 	}
 	return nil
 }
